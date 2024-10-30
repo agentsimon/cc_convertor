@@ -1,12 +1,34 @@
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import subprocess
 import os
 
-def browse_ply_file():
-    home_dir = os.path.expanduser("~")  # Get the user's home directory
+def choose_conversion_type():
+    """Displays a dialog to choose the conversion type using radio buttons."""
+    root = tk.Tk()
+    root.title("Choose Conversion Type")
+
+    var = tk.StringVar(value="3dgs_to_cc")
+
+    tk.Label(root, text="Select Conversion Type:").pack(pady=10)
+
+    tk.Radiobutton(root, text="3DGS to CloudCompare (with RGB)", variable=var, value="3dgs_to_cc").pack(anchor=tk.W)
+    tk.Radiobutton(root, text="CloudCompare to 3DGS", variable=var, value="cc_to_3dgs").pack(anchor=tk.W)
+
+    def get_choice():
+        choice = var.get()
+        root.destroy()
+        return choice
+
+    tk.Button(root, text="OK", command=get_choice).pack(pady=10)
+    root.mainloop()
+    return var.get()
+
+
+def browse_ply_file(conversion_type):
+    home_dir = os.path.expanduser("~")
     filename = filedialog.askopenfilename(
-        initialdir=home_dir,  # Start in the user's home directory
+        initialdir=home_dir,
         title="Select .ply file",
         filetypes=(("PLY files", "*.ply"), ("All files", "*.*"))
     )
@@ -14,17 +36,19 @@ def browse_ply_file():
         ply_entry.delete(0, tk.END)
         ply_entry.insert(0, filename)
 
-def browse_output_dir():
-    home_dir = os.path.expanduser("~")  # Get the user's home directory
+
+def browse_output_dir(conversion_type):
+    home_dir = os.path.expanduser("~")
     output_dir = filedialog.askdirectory(
-        initialdir=home_dir,  # Start in the user's home directory
+        initialdir=home_dir,
         title="Select Output Directory"
     )
     if output_dir:
         output_entry.delete(0, tk.END)
         output_entry.insert(0, output_dir)
 
-def convert_ply():
+
+def convert_ply(conversion_type):
     try:
         input_file = ply_entry.get()
         output_dir = output_entry.get()
@@ -32,30 +56,51 @@ def convert_ply():
         if not input_file or not output_dir:
             raise ValueError("Please select both input file and output directory.")
 
-        if not input_file.lower().endswith(".ply"):
-            raise ValueError("Selected file is not a .ply file.")
+        if conversion_type == "3dgs_to_cc":
+            if not input_file.lower().endswith(".ply"):
+                raise ValueError("Selected file is not a .ply file.")
+            basename = os.path.basename(input_file)
+            name, _ = os.path.splitext(basename)
+            output_file = os.path.join(output_dir, name + "_cc.ply")
+            command = [
+                "3dgsconverter",
+                "-i", input_file,
+                "-o", output_file,
+                "-f", "cc",
+                "--rgb"
+            ]
 
-        basename = os.path.basename(input_file)
-        name, _ = os.path.splitext(basename)
-        output_file = os.path.join(output_dir, name + "_cc.ply")
+        elif conversion_type == "cc_to_3dgs":
+            if not input_file.lower().endswith(".ply"):
+                raise ValueError("Selected input file is not a .ply file.")
+            basename = os.path.basename(input_file)
+            name, _ = os.path.splitext(basename)
+            output_file = os.path.join(output_dir, name + "_3dgs.ply")
+            command = [
+                "3dgsconverter",
+                "-i", input_file,
+                "-o", output_file,
+                "-f", "3dgs"
+            ]
+        else:
+            raise ValueError("Invalid conversion type selected.")
 
         if os.path.exists(output_file):
             raise FileExistsError(f"Output file already exists: {output_file}")
 
-        command = [
-            "3dgsconverter",
-            "-i", input_file,
-            "-o", output_file,
-            "-f", "cc",
-            "--rgb"
-        ]
+        process = subprocess.run(command, capture_output=True, text=True, check=False)
 
-        process = subprocess.run(command, capture_output=True, text=True, check=True)
-
-        if not os.path.exists(output_file):
-            raise FileNotFoundError(f"Output file not created: {output_file}")
-
-        result_label.config(text=f"Conversion successful! Output saved to: {output_file}")
+        if process.returncode == 0:
+            stderr_output = process.stderr if process.stderr else "Standard Error: 0"
+            result_label.config(text=f"Conversion successful! Output saved to: {output_file}\n\nStdout: {process.stdout}\n{stderr_output}")
+            print(f"Conversion successful! Output saved to: {output_file}")
+            print("Standard Output:\n", process.stdout)
+            print(stderr_output)
+        else:
+            result_label.config(text=f"Conversion failed with return code {process.returncode}!\nStdout: {process.stdout}\nStderr: {process.stderr}")
+            print(f"Conversion failed with return code {process.returncode}!")
+            print("Standard Output:\n", process.stdout)
+            print("Standard Error:\n", process.stderr)
 
     except FileExistsError as e:
         result_label.config(text=f"Error: {e}")
@@ -80,29 +125,33 @@ def center_window(root):
     root.geometry(f"+{x}+{y}")
 
 
-root = tk.Tk()
-root.title("PLY File Converter")
 
-ply_label = tk.Label(root, text="Select .ply file:")
-ply_label.grid(row=0, column=0, sticky="w")
-ply_entry = tk.Entry(root, width=50)
-ply_entry.grid(row=0, column=1)
-ply_button = tk.Button(root, text="Browse", command=browse_ply_file)
-ply_button.grid(row=0, column=2)
+conversion_type = choose_conversion_type()
+if conversion_type:
+    root = tk.Tk()
+    root.title("PLY File Converter")
 
-output_label = tk.Label(root, text="Select output directory:")
-output_label.grid(row=1, column=0, sticky="w")
-output_entry = tk.Entry(root, width=50)
-output_entry.grid(row=1, column=1)
-output_button = tk.Button(root, text="Browse", command=browse_output_dir)
-output_button.grid(row=1, column=2)
+    ply_label = tk.Label(root, text="Select .ply file:")
+    ply_label.grid(row=0, column=0, sticky="w")
+    ply_entry = tk.Entry(root, width=50)
+    ply_entry.grid(row=0, column=1)
+    ply_button = tk.Button(root, text="Browse", command=lambda: browse_ply_file(conversion_type))
+    ply_button.grid(row=0, column=2)
 
-convert_button = tk.Button(root, text="Convert", command=convert_ply)
-convert_button.grid(row=2, column=1)
+    output_label = tk.Label(root, text="Select output directory:")
+    output_label.grid(row=1, column=0, sticky="w")
+    output_entry = tk.Entry(root, width=50)
+    output_entry.grid(row=1, column=1)
+    output_button = tk.Button(root, text="Browse", command=lambda: browse_output_dir(conversion_type))
+    output_button.grid(row=1, column=2)
 
-result_label = tk.Label(root, text="")
-result_label.grid(row=3, column=0, columnspan=3)
+    convert_button = tk.Button(root, text="Convert", command=lambda: convert_ply(conversion_type))
+    convert_button.grid(row=2, column=1)
 
-center_window(root)
+    result_label = tk.Label(root, text="")
+    result_label.grid(row=3, column=0, columnspan=3)
 
-root.mainloop()
+    center_window(root)
+    root.mainloop()
+else:
+    print("Conversion cancelled by user.")
